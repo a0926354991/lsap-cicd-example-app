@@ -37,35 +37,48 @@ pipeline {
     }
 
     stage('Dev: Build + Push + Deploy (8081) + Verify') {
-      when { branch 'dev' }
-      steps {
-        script {
-          def devTag   = "dev-${env.BUILD_NUMBER}"
-          def devImage = "${env.IMAGE_REPO}:${devTag}"
+            when { branch 'dev' }
+            steps {
+                script {
+                    // 定義基本的變數
+                    def devTag = "dev-${env.BUILD_NUMBER}"
+                    def devImage = "${env.IMAGE_REPO}:${devTag}"
 
-          withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS_ID,
-                                            usernameVariable: 'DH_USER',
-                                            passwordVariable: 'DH_PASS')]) {
-            sh '''
-              set -eux
-              echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-            '''
-          }
+                    docker.withRegistry('', env.DOCKERHUB_CREDS_ID) {
+                        // --- 加分題邏輯開始 ---
+                        // 1. 讀取 package.json 的版本號 (例如 1.1.0)
+                        def pkgVersion = sh(script: "node -p \"require('./package.json').version\"", returnStdout: true).trim()
+                        echo "Detected Version: ${pkgVersion}"
+                        
+                        // 2. 登入 Docker Hub
+                        sh """
+                            set +x
+                            echo "\$DH_PASS" | docker login -u "\$DH_USER" --password-stdin
+                            set -x
+                        """
 
-          sh """
-            set -eux
-            docker build -t ${devImage} .
-            docker push ${devImage}
+                        // 3. 建立 Image
+                        sh "docker build -t ${devImage} ."
+                        
+                        // 4. 推送基本的 dev-XX Tag
+                        sh "docker push ${devImage}"
+                        
+                        // 5. 推送加分的 Semantic Version Tag (例如 v1.1.0)
+                        def semanticImage = "${env.IMAGE_REPO}:v${pkgVersion}"
+                        sh "docker tag ${devImage} ${semanticImage}"
+                        sh "docker push ${semanticImage}"
+                        // --- 加分題邏輯結束 ---
+                    }
 
-            docker rm -f ${DEV_CONTAINER} || true
-            docker run -d --name ${DEV_CONTAINER} -p ${DEV_HOST_PORT}:${APP_PORT} ${devImage}
-
-            sleep 2
-            curl -fsS http://localhost:${DEV_HOST_PORT}/health
-          """
+                    // 部署到 Port 8081 (維持原樣)
+                    sh "docker rm -f ${env.DEV_CONTAINER} || true"
+                    sh "docker run -d --name ${env.DEV_CONTAINER} -p ${env.DEV_HOST_PORT}:${env.APP_PORT} ${devImage}"
+                    
+                    sleep 2
+                    sh "curl -fsS http://localhost:${env.DEV_HOST_PORT}/health"
+                }
+            }
         }
-      }
-    }
 
     stage('Main: Promote (NO BUILD) + Deploy (8082)') {
       when { branch 'main' }

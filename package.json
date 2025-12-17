@@ -1,6 +1,6 @@
 {
   "name": "cicd-lab-starter-app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A starter application for the NTU CI/CD workshop.",
   "main": "server.js",
   "scripts": {
